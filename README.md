@@ -27,18 +27,18 @@ npx serve .
 
 ## Deploy to GitHub Pages
 
-1. Create a new repository on GitHub (for example `weight-journey`).
+1. Create a new repository on GitHub (this project lives at `tsc862-prog/Health-Tracker`).
 2. Push this folder to it:
 
    ```sh
-   git remote add origin https://github.com/<your-username>/weight-journey.git
+   git remote add origin https://github.com/<your-username>/Health-Tracker.git
    git branch -M main
    git push -u origin main
    ```
 
 3. In the repository, open **Settings → Pages**.
 4. Under **Build and deployment**, set **Source** to *Deploy from a branch*, pick the `main` branch and the `/ (root)` folder, then save.
-5. After a minute the site is live at `https://<your-username>.github.io/weight-journey/`.
+5. After a minute the site is live at `https://<your-username>.github.io/Health-Tracker/`.
 
 Because the app uses only relative paths, it works at any sub-path without configuration.
 
@@ -50,7 +50,7 @@ The connection details live in `js/config.js`. The publishable key is meant to b
 
 Email confirmation and password reset links need to send people back to the app. In the Supabase dashboard for the project, open **Authentication → URL Configuration** and set:
 
-- **Site URL**: your GitHub Pages address, for example `https://<your-username>.github.io/weight-journey/`
+- **Site URL**: your GitHub Pages address, for example `https://tsc862-prog.github.io/Health-Tracker/`
 - **Redirect URLs**: add the same address
 
 Until this is set, confirmation links land on a Supabase default page. The account is still confirmed and you can sign in from the app afterwards.
