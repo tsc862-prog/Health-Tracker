@@ -83,7 +83,7 @@ Every table has a policy restricting all operations to `auth.uid() = user_id`. T
 
 When a release adds a table, run the new file from `supabase/migrations/` in the project's SQL editor (Supabase dashboard → SQL Editor → paste → Run). Until then the app keeps that data on-device and says so on the Settings page; it uploads automatically on the next sync after the table exists.
 
-Pending for the current release: `20261014000000_blood_pressure.sql`.
+All migrations in the folder are applied to the Weight Journey project as of 2026-10-14.
 
 ## Project layout
 
