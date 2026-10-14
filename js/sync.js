@@ -14,7 +14,11 @@
   const META_KEY = 'weight-journey.sync.v1';
   const { h, $, clear } = WJ;
 
-  const KINDS = ['weights', 'meals', 'exercise', 'mealPresets', 'exercisePresets'];
+  const KINDS = ['weights', 'meals', 'exercise', 'mealPresets', 'exercisePresets', 'bloodPressure'];
+  // Kinds whose table may not exist yet on the server (migration not applied). They stay local until it does.
+  const OPTIONAL = { bloodPressure: true };
+  const missingTables = new Set();
+  const isMissingTable = (err) => !!err && (err.code === '42P01' || err.code === 'PGRST205' || /could not find the table|does not exist/i.test(err.message || ''));
   const emptyKeys = () => Object.fromEntries(KINDS.map((k) => [k, []]));
   const defaultMeta = () => ({ dirty: emptyKeys(), tomb: emptyKeys(), settings: false, all: false, wipe: false, lastSync: 0 });
 
@@ -109,10 +113,11 @@
       return;
     }
     if (session) {
-      const line = status === 'syncing' ? 'Syncing…'
+      let line = status === 'syncing' ? 'Syncing…'
         : status === 'offline' ? 'Offline. Changes are saved here and will sync when you reconnect.'
         : status === 'error' ? `Could not sync: ${lastError}`
         : `Last synced ${timeAgo(meta.lastSync)}.`;
+      if (missingTables.has('bloodPressure') && status === 'synced') line += ' Blood pressure readings stay on this device until the blood_pressure table is added (see README).';
       card.append(
         h('div', { class: 'card__head' },
           h('div', null, h('h2', { class: 'card__title' }, 'Account & sync'),
@@ -249,6 +254,7 @@
     exercise: (uid, x) => ({ id: x.id, user_id: uid, date: x.date, activity: x.activity, minutes: x.minutes, calories: x.calories, notes: x.notes || '', created_at: iso(x.createdAt), updated_at: iso(x.updatedAt) }),
     mealPresets: (uid, p) => ({ id: p.id, user_id: uid, name: p.name, type: p.type || '', calories: p.calories, protein_g: p.protein, carbs_g: p.carbs, fat_g: p.fat, updated_at: iso(p.updatedAt) }),
     exercisePresets: (uid, p) => ({ id: p.id, user_id: uid, name: p.name, minutes: p.minutes, calories: p.calories, updated_at: iso(p.updatedAt) }),
+    bloodPressure: (uid, r) => ({ id: r.id, user_id: uid, date: r.date, time: r.time, systolic: r.systolic, diastolic: r.diastolic, pulse: r.pulse, note: r.note || '', created_at: iso(r.createdAt), updated_at: iso(r.updatedAt) }),
   };
   const fromRemote = {
     weights: (r) => ({ id: WJ.uid(), date: r.date, kg: Number(r.kg), note: r.note || '', updatedAt: ms(r.updated_at) }),
@@ -256,11 +262,12 @@
     exercise: (r) => ({ id: r.id, date: r.date, activity: r.activity, minutes: r.minutes, calories: r.calories, notes: r.notes || '', createdAt: ms(r.created_at), updatedAt: ms(r.updated_at) }),
     mealPresets: (r) => ({ id: r.id, name: r.name, type: r.type || '', calories: r.calories, protein: r.protein_g, carbs: r.carbs_g, fat: r.fat_g, updatedAt: ms(r.updated_at) }),
     exercisePresets: (r) => ({ id: r.id, name: r.name, minutes: r.minutes, calories: r.calories, updatedAt: ms(r.updated_at) }),
+    bloodPressure: (r) => ({ id: r.id, date: r.date, time: (r.time || '12:00').slice(0, 5), systolic: r.systolic, diastolic: r.diastolic, pulse: r.pulse, note: r.note || '', createdAt: ms(r.created_at), updatedAt: ms(r.updated_at) }),
   };
-  const TABLE = { weights: 'weigh_ins', meals: 'meals', exercise: 'exercise', mealPresets: 'meal_presets', exercisePresets: 'exercise_presets' };
-  const KEYCOL = { weights: 'date', meals: 'id', exercise: 'id', mealPresets: 'id', exercisePresets: 'id' };
-  const keyOf = { weights: (w) => w.date, meals: (m) => m.id, exercise: (x) => x.id, mealPresets: (p) => p.id, exercisePresets: (p) => p.id };
-  const CONFLICT = { weights: 'user_id,date', meals: 'id', exercise: 'id', mealPresets: 'id', exercisePresets: 'id' };
+  const TABLE = { weights: 'weigh_ins', meals: 'meals', exercise: 'exercise', mealPresets: 'meal_presets', exercisePresets: 'exercise_presets', bloodPressure: 'blood_pressure' };
+  const KEYCOL = { weights: 'date', meals: 'id', exercise: 'id', mealPresets: 'id', exercisePresets: 'id', bloodPressure: 'id' };
+  const keyOf = { weights: (w) => w.date, meals: (m) => m.id, exercise: (x) => x.id, mealPresets: (p) => p.id, exercisePresets: (p) => p.id, bloodPressure: (r) => r.id };
+  const CONFLICT = { weights: 'user_id,date', meals: 'id', exercise: 'id', mealPresets: 'id', exercisePresets: 'id', bloodPressure: 'id' };
 
   async function sync(manual) {
     if (!sb || !session) { setStatus(sb ? 'off' : 'unconfigured'); return; }
@@ -278,24 +285,36 @@
       const uid = session.user.id;
       const local = WJ.getState();
 
+      const optionalMissing = (kind, err) => { if (OPTIONAL[kind] && isMissingTable(err)) { missingTables.add(kind); return true; } return false; };
       if (job.wipe) {
-        for (const t of [...Object.values(TABLE), 'user_settings']) {
+        for (const kind of [...KINDS, 'settings']) {
+          const t = kind === 'settings' ? 'user_settings' : TABLE[kind];
           const { error } = await sb.from(t).delete().eq('user_id', uid);
-          if (error) throw error;
+          if (error && !optionalMissing(kind, error)) throw error;
         }
       }
       for (const kind of KINDS) {
-        if (job.tomb[kind].length) await deleteKeys(TABLE[kind], KEYCOL[kind], job.tomb[kind]);
+        if (!job.tomb[kind].length) continue;
+        try { await deleteKeys(TABLE[kind], KEYCOL[kind], job.tomb[kind]); }
+        catch (err) { if (!optionalMissing(kind, err)) throw err; job.tomb[kind].forEach((k) => addKey(meta.tomb[kind], k)); }
       }
 
       const remote = {};
       const [rs] = await Promise.all([
         sb.from('user_settings').select('*').maybeSingle().then(({ data, error }) => { if (error) throw error; return data; }),
-        ...KINDS.map((kind) => fetchAll(TABLE[kind]).then((rows) => { remote[kind] = rows; })),
+        ...KINDS.map((kind) => fetchAll(TABLE[kind]).then((rows) => { remote[kind] = rows; missingTables.delete(kind); })
+          .catch((err) => { if (!optionalMissing(kind, err)) throw err; remote[kind] = null; })),
       ]);
       const merged = {};
 
       for (const kind of KINDS) {
+        if (remote[kind] == null) {
+          // Table not on the server yet: keep everything local and queued for later.
+          const keys = job.all ? local[kind].map(keyOf[kind]) : job.dirty[kind];
+          keys.forEach((k) => { if (!meta.tomb[kind].includes(k)) addKey(meta.dirty[kind], k); });
+          merged[kind] = WJ.getState()[kind];
+          continue;
+        }
         const remoteMap = new Map(remote[kind].map((r) => [r[KEYCOL[kind]], r]));
         const candidates = job.all ? local[kind].map(keyOf[kind]) : job.dirty[kind];
         const push = [];

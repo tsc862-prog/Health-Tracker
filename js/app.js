@@ -20,6 +20,7 @@
     exercise: [],  // { id, date, activity, minutes, calories: number|null, notes, createdAt, updatedAt }
     mealPresets: [],     // { id, name, type: ''|Breakfast|..., calories: number|null, updatedAt }
     exercisePresets: [], // { id, name, minutes: number|null, calories: number|null, updatedAt }
+    bloodPressure: [],   // { id, date, time: 'HH:MM', systolic, diastolic, pulse: number|null, note, createdAt, updatedAt }
   });
 
   function normalize(p) {
@@ -66,6 +67,13 @@
       exercisePresets: (Array.isArray(p.exercisePresets) ? p.exercisePresets : [])
         .filter((x) => x && typeof x.name === 'string' && x.name.trim())
         .map((x) => ({ id: id(x.id), name: str(x.name, 120).trim(), minutes: num(x.minutes), calories: num(x.calories), updatedAt: stamp(x) })),
+      bloodPressure: (Array.isArray(p.bloodPressure) ? p.bloodPressure : [])
+        .filter((r) => r && date(r.date) && num(r.systolic) > 0 && num(r.diastolic) > 0)
+        .map((r) => ({
+          id: id(r.id), date: r.date, time: /^\d{2}:\d{2}$/.test(r.time) ? r.time : '12:00',
+          systolic: Math.round(r.systolic), diastolic: Math.round(r.diastolic), pulse: num(r.pulse) != null ? Math.round(r.pulse) : null,
+          note: str(r.note, 140), createdAt: num(r.createdAt) || 0, updatedAt: stamp(r),
+        })),
     };
   }
 
@@ -159,6 +167,38 @@
     return vals.length ? vals.reduce((a, b) => a + b, 0) : null;
   }
 
+  // ---------- blood pressure helpers ----------
+  function nowHHMM() { const d = new Date(); return `${pad(d.getHours())}:${pad(d.getMinutes())}`; }
+  function fmtTime(hhmm) {
+    const [hh, mm] = hhmm.split(':').map(Number);
+    return new Date(2000, 0, 1, hh, mm).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
+  }
+  function readingMs(r) { const [hh, mm] = r.time.split(':').map(Number); const d = parseISO(r.date); d.setHours(hh, mm, 0, 0); return d.getTime(); }
+  /** American Heart Association categories. */
+  function bpCategory(sys, dia) {
+    if (sys > 180 || dia > 120) return { level: 'crisis', label: 'Crisis, seek care' };
+    if (sys >= 140 || dia >= 90) return { level: 'stage2', label: 'High, stage 2' };
+    if (sys >= 130 || dia >= 80) return { level: 'stage1', label: 'High, stage 1' };
+    if (sys >= 120) return { level: 'elevated', label: 'Elevated' };
+    return { level: 'normal', label: 'Normal' };
+  }
+  function bpLevelEl(sys, dia) {
+    const c = bpCategory(sys, dia);
+    return h('span', { class: 'bp-level', dataset: { level: c.level } }, c.label);
+  }
+  const bpSort = (a, b) => a.date.localeCompare(b.date) || a.time.localeCompare(b.time) || a.createdAt - b.createdAt;
+  const sortedBp = () => [...state.bloodPressure].sort(bpSort);
+  const bpOn = (date) => state.bloodPressure.filter((r) => r.date === date).sort(bpSort);
+  function bpAverage(readings) {
+    if (!readings.length) return null;
+    const n = readings.length;
+    const sys = Math.round(readings.reduce((s, r) => s + r.systolic, 0) / n);
+    const dia = Math.round(readings.reduce((s, r) => s + r.diastolic, 0) / n);
+    const withPulse = readings.filter((r) => r.pulse != null);
+    const pulse = withPulse.length ? Math.round(withPulse.reduce((s, r) => s + r.pulse, 0) / withPulse.length) : null;
+    return { sys, dia, pulse, n };
+  }
+
   // DOM creation helper: h(tag, attrs, ...children). Text children use textContent.
   function h(tag, attrs, ...children) {
     const el = document.createElement(tag);
@@ -241,15 +281,18 @@
   // ================================================================
   function renderDashboard() {
     const ws = sortedWeights();
-    $('#dash-empty').hidden = ws.length > 0;
-    $('#dash-content').hidden = ws.length === 0;
+    const hasAny = ws.length > 0 || state.bloodPressure.length > 0;
+    $('#dash-empty').hidden = hasAny;
+    $('#dash-content').hidden = !hasAny;
     $('#dash-subtitle').textContent = ws.length
       ? `${ws.length} weigh-in${ws.length === 1 ? '' : 's'} since ${fmtDate(ws[0].date, { month: 'long', day: 'numeric', year: 'numeric' })}`
       : 'Your progress at a glance';
-    if (!ws.length) return;
+    if (!hasAny) return;
 
-    renderTiles(ws);
-    renderChart(ws);
+    $('#tiles').hidden = !ws.length;
+    $('#weight-card').hidden = !ws.length;
+    if (ws.length) { renderTiles(ws); renderChart(ws); }
+    renderBpDashboard();
     renderWeekTiles();
   }
 
@@ -541,6 +584,168 @@
     tip.style.top = `${top}px`;
   }
 
+  // ---------- blood pressure dashboard ----------
+  function renderBpDashboard() {
+    const card = $('#bp-card');
+    const all = sortedBp();
+    card.hidden = !all.length;
+    if (!all.length) return;
+    const label = chartRange === 'all' ? 'All time' : `Last ${chartRange} days`;
+    const start = rangeStart(chartRange, all);
+    const inRange = all.filter((r) => r.date >= start);
+    $('#bp-sub').textContent = `${label} · ${inRange.length} reading${inRange.length === 1 ? '' : 's'}`;
+
+    // stat tiles: latest reading and 7-day average
+    const tiles = $('#bp-tiles');
+    clear(tiles);
+    const latest = all[all.length - 1];
+    tiles.append(tile('Latest reading', `${latest.systolic}/${latest.diastolic}`, 'mmHg',
+      h('div', { class: 'tile__delta' }, bpLevelEl(latest.systolic, latest.diastolic), ` · ${relDay(latest.date) === fmtDateLong(latest.date) ? fmtDate(latest.date) : relDay(latest.date)} ${fmtTime(latest.time)}`)));
+    tiles.append(tile('Pulse', latest.pulse != null ? `${latest.pulse}` : '—', latest.pulse != null ? 'bpm' : '',
+      h('div', { class: 'tile__delta' }, latest.pulse != null ? 'At latest reading' : 'Not recorded')));
+    const week = all.filter((r) => r.date >= addDays(todayISO(), -6));
+    const avg = bpAverage(week);
+    tiles.append(tile('7-day average', avg ? `${avg.sys}/${avg.dia}` : '—', avg ? 'mmHg' : '',
+      h('div', { class: 'tile__delta' }, avg ? [bpLevelEl(avg.sys, avg.dia), ` · ${avg.n} reading${avg.n === 1 ? '' : 's'}`] : 'No readings this week')));
+
+    renderBpTable(inRange);
+    renderBpChart(inRange, label);
+  }
+
+  function renderBpChart(rs, label) {
+    const svg = $('#bp-svg');
+    const tooltip = $('#bp-tooltip');
+    clear(svg);
+    tooltip.hidden = true;
+    const empty = rs.length < 2;
+    svg.style.display = empty ? 'none' : '';
+    $('#bp-empty').hidden = !empty;
+    $('#bp-legend').hidden = empty;
+    if (empty) return;
+
+    const W = Math.max(280, $('#bp-chart').clientWidth);
+    const H = 220;
+    const m = { top: 14, right: 40, bottom: 28, left: 40 };
+    const iw = W - m.left - m.right, ih = H - m.top - m.bottom;
+    svg.setAttribute('viewBox', `0 0 ${W} ${H}`);
+    svg.setAttribute('width', W);
+    svg.setAttribute('height', H);
+    svg.setAttribute('aria-label', `Blood pressure trend, ${label.toLowerCase()}. Table view available below.`);
+
+    const t0 = readingMs(rs[0]), t1 = readingMs(rs[rs.length - 1]);
+    const tspan = Math.max(t1 - t0, 3600000);
+    const x = (r) => m.left + ((readingMs(r) - t0) / tspan) * iw;
+    let lo = Math.min(...rs.map((r) => r.diastolic)) - 8;
+    let hi = Math.max(...rs.map((r) => r.systolic)) + 8;
+    const step = niceStep(hi - lo, 4);
+    lo = Math.floor(lo / step) * step;
+    hi = Math.ceil(hi / step) * step;
+    const y = (v) => m.top + ih - ((v - lo) / (hi - lo)) * ih;
+
+    const ns = 'http://www.w3.org/2000/svg';
+    const s = (tag, attrs) => { const el = document.createElementNS(ns, tag); for (const [k, v] of Object.entries(attrs || {})) el.setAttribute(k, v); return el; };
+
+    const grid = s('g', { class: 'grid' });
+    for (let v = lo; v <= hi + 1e-9; v += step) {
+      grid.append(s('line', { x1: m.left, x2: m.left + iw, y1: y(v), y2: y(v) }));
+      const t = s('text', { class: 'tick-label', x: m.left - 8, y: y(v) + 4, 'text-anchor': 'end' });
+      t.textContent = String(Math.round(v));
+      grid.append(t);
+    }
+    svg.append(grid);
+    svg.append(s('line', { class: 'axis-base', x1: m.left, x2: m.left + iw, y1: m.top + ih, y2: m.top + ih }));
+
+    // reference lines for the "normal" ceilings
+    for (const [v, text] of [[120, '120 sys'], [80, '80 dia']]) {
+      if (v <= lo || v >= hi) continue;
+      svg.append(s('line', { class: 'goal-line', x1: m.left, x2: m.left + iw, y1: y(v), y2: y(v) }));
+      const gl = s('text', { class: 'goal-label', x: m.left + iw + 6, y: y(v) + 4 });
+      gl.textContent = text;
+      svg.append(gl);
+    }
+
+    const nTicks = Math.min(rs.length, Math.max(2, Math.floor(iw / 90)));
+    let lastX = -Infinity;
+    for (let i = 0; i < nTicks; i++) {
+      const idx = Math.round((i / (nTicks - 1)) * (rs.length - 1));
+      const xx = x(rs[idx]);
+      if (xx - lastX < 60) continue;
+      lastX = xx;
+      const t = s('text', { class: 'tick-label', x: xx, y: H - 8, 'text-anchor': i === 0 ? 'start' : i === nTicks - 1 ? 'end' : 'middle' });
+      t.textContent = fmtDate(rs[idx].date);
+      svg.append(t);
+    }
+
+    const path = (key, cls) => s('path', { class: cls, d: rs.map((r, i) => `${i ? 'L' : 'M'}${x(r).toFixed(1)},${y(r[key]).toFixed(1)}`).join(' ') });
+    svg.append(path('diastolic', 'avg-line'));
+    svg.append(path('systolic', 'series-line'));
+    const cross = s('line', { class: 'crosshair', x1: 0, x2: 0, y1: m.top, y2: m.top + ih, visibility: 'hidden' });
+    svg.append(cross);
+    const dots = s('g');
+    rs.forEach((r) => {
+      dots.append(s('circle', { class: 'dot', cx: x(r), cy: y(r.systolic), r: 4 }));
+      dots.append(s('circle', { class: 'dot dot--dia', cx: x(r), cy: y(r.diastolic), r: 4 }));
+    });
+    svg.append(dots);
+    const hit = s('rect', { class: 'hit', x: m.left, y: m.top, width: iw, height: ih });
+    svg.append(hit);
+
+    let active = -1;
+    const setActive = (i) => {
+      active = i;
+      Array.from(dots.children).forEach((c, k) => c.classList.toggle('is-active', Math.floor(k / 2) === i));
+      if (i < 0) { cross.setAttribute('visibility', 'hidden'); tooltip.hidden = true; return; }
+      const r = rs[i];
+      cross.setAttribute('x1', x(r)); cross.setAttribute('x2', x(r)); cross.setAttribute('visibility', 'visible');
+      clear(tooltip);
+      tooltip.append(h('div', { class: 'tooltip__date' }, `${fmtDate(r.date, { weekday: 'short', month: 'short', day: 'numeric' })} · ${fmtTime(r.time)}`));
+      tooltip.append(h('div', { class: 'tooltip__row' }, h('span', null, h('span', { class: 'tooltip__key', style: 'background:var(--series-1)' }), 'Systolic'), h('span', { class: 'tooltip__val' }, `${r.systolic}`)));
+      tooltip.append(h('div', { class: 'tooltip__row' }, h('span', null, h('span', { class: 'tooltip__key', style: 'background:var(--series-2)' }), 'Diastolic'), h('span', { class: 'tooltip__val' }, `${r.diastolic}`)));
+      if (r.pulse != null) tooltip.append(h('div', { class: 'tooltip__row' }, h('span', null, 'Pulse'), h('span', { class: 'tooltip__val' }, `${r.pulse} bpm`)));
+      tooltip.append(h('div', { class: 'tooltip__row' }, bpLevelEl(r.systolic, r.diastolic)));
+      if (r.note) tooltip.append(h('div', { class: 'tooltip__row' }, h('span', { class: 'muted' }, r.note)));
+      tooltip.hidden = false;
+      const box = $('#bp-chart').getBoundingClientRect();
+      const scale = box.width / W;
+      const px = x(r) * scale, py = y(r.systolic) * scale;
+      let left = px + 14;
+      if (left + tooltip.offsetWidth > box.width - 4) left = px - tooltip.offsetWidth - 14;
+      tooltip.style.left = `${left}px`;
+      tooltip.style.top = `${Math.max(4, Math.min(box.height - tooltip.offsetHeight - 4, py - tooltip.offsetHeight / 2))}px`;
+    };
+    const nearest = (clientX) => {
+      const rect = svg.getBoundingClientRect();
+      const px = ((clientX - rect.left) / rect.width) * W;
+      let best = 0, bd = Infinity;
+      rs.forEach((r, i) => { const d = Math.abs(x(r) - px); if (d < bd) { bd = d; best = i; } });
+      return best;
+    };
+    hit.addEventListener('pointermove', (e) => setActive(nearest(e.clientX)));
+    hit.addEventListener('pointerdown', (e) => setActive(nearest(e.clientX)));
+    hit.addEventListener('pointerleave', () => setActive(-1));
+    svg.addEventListener('keydown', (e) => {
+      if (e.key === 'ArrowRight') { e.preventDefault(); setActive(Math.min(rs.length - 1, active < 0 ? rs.length - 1 : active + 1)); }
+      else if (e.key === 'ArrowLeft') { e.preventDefault(); setActive(Math.max(0, active < 0 ? rs.length - 1 : active - 1)); }
+      else if (e.key === 'Escape') setActive(-1);
+    });
+    svg.addEventListener('focus', () => { if (active < 0) setActive(rs.length - 1); });
+    svg.addEventListener('blur', () => setActive(-1));
+  }
+
+  function renderBpTable(rs) {
+    const table = $('#bp-table');
+    clear(table);
+    if (!rs.length) return;
+    table.append(h('thead', null, h('tr', null, h('th', null, 'Date'), h('th', null, 'Time'), h('th', { class: 'num' }, 'SYS'), h('th', { class: 'num' }, 'DIA'), h('th', { class: 'num' }, 'Pulse'), h('th', null, 'Category'), h('th', null, 'Note'))));
+    const body = h('tbody');
+    [...rs].reverse().forEach((r) => body.append(h('tr', null,
+      h('td', null, fmtDate(r.date, { month: 'short', day: 'numeric', year: 'numeric' })), h('td', null, fmtTime(r.time)),
+      h('td', { class: 'num' }, `${r.systolic}`), h('td', { class: 'num' }, `${r.diastolic}`),
+      h('td', { class: r.pulse != null ? 'num' : 'num muted' }, r.pulse != null ? `${r.pulse}` : '—'),
+      h('td', null, bpLevelEl(r.systolic, r.diastolic)), h('td', { class: 'wrap muted' }, r.note || ''))));
+    table.append(body);
+  }
+
   function renderChartTable(ws) {
     const table = $('#chart-table');
     clear(table);
@@ -623,23 +828,55 @@
 
     renderPresetChips();
 
+    // blood pressure
+    const bps = bpOn(logDate);
+    const bl = $('#bp-list');
+    clear(bl);
+    bps.forEach((r) => bl.append(entryRow({
+      badge: fmtTime(r.time), title: `${r.systolic}/${r.diastolic} mmHg`, sub: r.note,
+      meta: r.pulse != null ? `${r.pulse} bpm` : '', level: bpLevelEl(r.systolic, r.diastolic),
+      onDelete: () => { if (confirm(`Remove the ${fmtTime(r.time)} reading?`)) { state.bloodPressure = state.bloodPressure.filter((x) => x.id !== r.id); save(); notify('bloodPressure', 'delete', r.id); render(); } },
+    })));
+    const bavg = bpAverage(bps);
+    $('#bp-total').textContent = bavg ? `${bavg.n} reading${bavg.n === 1 ? '' : 's'}${bavg.n > 1 ? ` · avg ${bavg.sys}/${bavg.dia}` : ''}` : '';
+    const bf = $('#bp-form');
+    if (!bf.systolic.value && !bf.diastolic.value) bf.time.value = logDate === todayISO() ? nowHHMM() : (bf.time.value || '08:00');
+
     // day tiles
     const dt = $('#day-tiles');
     clear(dt);
     const macros = macroLine({ protein: sumOrNull(meals, 'protein'), carbs: sumOrNull(meals, 'carbs'), fat: sumOrNull(meals, 'fat') });
+    const lastBp = bps[bps.length - 1];
     dt.append(
       tile('Weight', w ? fmtW(w.kg, false) : '—', w ? unit() : ''),
       tile('Eaten', kcal ? fmtInt(kcal) : (meals.length ? `${meals.length}` : '—'), kcal ? 'kcal' : (meals.length ? 'meals' : ''),
         macros ? h('div', { class: 'tile__delta' }, macros) : null),
       tile('Exercise', mins ? fmtMinutes(mins) : '—', ''),
       tile('Burned', burned ? fmtInt(burned) : '—', burned ? 'kcal' : ''),
+      tile('Blood pressure', lastBp ? `${lastBp.systolic}/${lastBp.diastolic}` : '—', lastBp && lastBp.pulse != null ? `${lastBp.pulse} bpm` : '',
+        lastBp ? h('div', { class: 'tile__delta' }, bpLevelEl(lastBp.systolic, lastBp.diastolic)) : null),
     );
   }
 
-  function entryRow({ badge, title, sub, meta, onDelete }) {
+  /** Add a blood pressure reading. Caller renders. */
+  function addReading(fields, date = logDate) {
+    const sys = intOrNull(fields.systolic), dia = intOrNull(fields.diastolic);
+    if (sys == null || dia == null || sys < 40 || sys > 300 || dia < 20 || dia > 200) return null;
+    const pulse = intOrNull(fields.pulse);
+    const r = {
+      id: uid(), date, time: /^\d{2}:\d{2}$/.test(fields.time) ? fields.time : nowHHMM(),
+      systolic: sys, diastolic: dia, pulse: pulse != null && pulse >= 20 && pulse <= 300 ? pulse : null,
+      note: String(fields.note || '').trim().slice(0, 140), createdAt: Date.now(), updatedAt: Date.now(),
+    };
+    state.bloodPressure.push(r);
+    save(); notify('bloodPressure', 'upsert', r.id);
+    return r;
+  }
+
+  function entryRow({ badge, title, sub, meta, level, onDelete }) {
     return h('li', { class: 'entry' },
       h('span', { class: 'entry__badge' }, badge),
-      h('div', { class: 'entry__main' }, h('span', { class: 'entry__title' }, title), sub ? h('span', { class: 'entry__sub' }, sub) : null),
+      h('div', { class: 'entry__main' }, h('span', { class: 'entry__title' }, title, level ? ' ' : null, level || null), sub ? h('span', { class: 'entry__sub' }, sub) : null),
       h('span', { class: 'entry__meta' }, meta || ''),
       h('button', { class: 'entry__del', type: 'button', 'aria-label': `Remove ${title}`, onclick: onDelete }, '×'));
   }
@@ -691,6 +928,16 @@
       f.classList.remove('show-macros');
       render(); toast(presetSaved ? 'Meal added and saved as a preset' : 'Meal added');
       f.description.focus();
+    });
+
+    $('#bp-form').addEventListener('submit', (e) => {
+      e.preventDefault();
+      const f = e.target;
+      const r = addReading({ time: f.time.value, systolic: f.systolic.value, diastolic: f.diastolic.value, pulse: f.pulse.value, note: f.note.value });
+      if (!r) { toast('Enter a systolic and diastolic reading.'); return; }
+      f.systolic.value = ''; f.diastolic.value = ''; f.pulse.value = ''; f.note.value = '';
+      render(); toast(`Reading ${r.systolic}/${r.diastolic} saved`);
+      f.systolic.focus();
     });
 
     $('#exercise-form').addEventListener('submit', (e) => {
@@ -748,6 +995,19 @@
         h('td', { class: mm.calories != null ? 'num' : 'num muted' }, mm.calories != null ? fmtInt(mm.calories) : '—'),
         h('td', { class: macroLine(mm) ? 'num' : 'num muted' }, macroLine(mm) ? `${g(mm.protein)} / ${g(mm.carbs)} / ${g(mm.fat)}` : '—'),
         delBtn(`Remove ${mm.description}`, () => { if (confirm(`Remove "${mm.description}"?`)) { state.meals = state.meals.filter((x) => x.id !== mm.id); save(); notify('meals', 'delete', mm.id); render(); } }))));
+      table.append(body);
+    } else if (historyTab === 'bp') {
+      const rs = sortedBp().reverse();
+      empty.hidden = rs.length > 0;
+      empty.textContent = 'No blood pressure readings yet.';
+      if (!rs.length) return;
+      table.append(h('thead', null, h('tr', null, h('th', null, 'Date'), h('th', null, 'Time'), h('th', { class: 'num' }, 'SYS'), h('th', { class: 'num' }, 'DIA'), h('th', { class: 'num' }, 'Pulse'), h('th', null, 'Category'), h('th', null, 'Note'), h('th'))));
+      const body = h('tbody');
+      rs.forEach((r) => body.append(h('tr', null, dateCell(r.date), h('td', null, fmtTime(r.time)),
+        h('td', { class: 'num' }, `${r.systolic}`), h('td', { class: 'num' }, `${r.diastolic}`),
+        h('td', { class: r.pulse != null ? 'num' : 'num muted' }, r.pulse != null ? `${r.pulse}` : '—'),
+        h('td', null, bpLevelEl(r.systolic, r.diastolic)), h('td', { class: 'wrap muted' }, r.note || ''),
+        delBtn(`Remove reading on ${r.date} at ${r.time}`, () => { if (confirm('Remove this reading?')) { state.bloodPressure = state.bloodPressure.filter((x) => x.id !== r.id); save(); notify('bloodPressure', 'delete', r.id); render(); } }))));
       table.append(body);
     } else {
       const es = [...state.exercise].sort((a, b) => b.date.localeCompare(a.date) || b.createdAt - a.createdAt);
@@ -920,7 +1180,7 @@
     f.goalWeight.value = state.settings.goalWeightKg ? toDisplay(state.settings.goalWeightKg).toFixed(1) : '';
     f.theme.value = state.settings.theme;
     const n = (k) => state[k].length;
-    $('#data-summary').textContent = `${n('weights')} weigh-ins, ${n('meals')} meals, ${n('exercise')} exercise sessions on this device.`;
+    $('#data-summary').textContent = `${n('weights')} weigh-ins, ${n('meals')} meals, ${n('exercise')} exercise sessions, ${n('bloodPressure')} blood pressure readings on this device.`;
     notify('settings', 'render');
   }
 
@@ -977,9 +1237,10 @@
           const byDate = new Map(state.weights.map((w) => [w.date, w]));
           incoming.weights.forEach((w) => byDate.set(w.date, w));
           state.weights = [...byDate.values()];
-          const ids = new Set([...state.meals, ...state.exercise].map((x) => x.id));
+          const ids = new Set([...state.meals, ...state.exercise, ...state.bloodPressure].map((x) => x.id));
           state.meals.push(...incoming.meals.filter((m) => !ids.has(m.id)));
           state.exercise.push(...incoming.exercise.filter((x) => !ids.has(x.id)));
+          state.bloodPressure.push(...incoming.bloodPressure.filter((x) => !ids.has(x.id)));
           for (const kind of ['mealPresets', 'exercisePresets']) {
             const names = new Set(state[kind].map((p) => p.name.toLowerCase()));
             state[kind].push(...incoming[kind].filter((p) => !names.has(p.name.toLowerCase())));
@@ -1020,7 +1281,7 @@
     },
     clearLocal: () => { const theme = state.settings.theme; state = defaultState(); state.settings.theme = theme; save(); render(); },
     onChange: (fn) => listeners.push(fn),
-    addMeal, savePreset, defaultMealType, intOrNull,
+    addMeal, addReading, savePreset, defaultMealType, intOrNull,
     getLogDate: () => logDate,
     fmtLogDate: () => (logDate === todayISO() ? 'today' : `on ${fmtDate(logDate)}`),
     render, toast, uid, isUuid, h, $, $$, clear, todayISO,

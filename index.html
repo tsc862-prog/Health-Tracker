@@ -61,7 +61,7 @@
       <div id="dash-content" hidden>
         <div class="tiles" id="tiles"></div>
 
-        <section class="card chart-card" aria-labelledby="chart-title">
+        <section class="card chart-card" id="weight-card" aria-labelledby="chart-title">
           <div class="card__head">
             <div>
               <h2 id="chart-title" class="card__title">Weight trend</h2>
@@ -87,6 +87,30 @@
           <details class="table-toggle" id="chart-table-wrap">
             <summary>Table view</summary>
             <div class="table-scroll"><table class="table" id="chart-table"></table></div>
+          </details>
+        </section>
+
+        <section class="card chart-card" id="bp-card" aria-labelledby="bp-title" hidden>
+          <div class="card__head">
+            <div>
+              <h2 id="bp-title" class="card__title">Blood pressure</h2>
+              <p class="card__sub" id="bp-sub"></p>
+            </div>
+          </div>
+          <div class="tiles tiles--compact tiles--3" id="bp-tiles"></div>
+          <div class="legend" id="bp-legend" hidden>
+            <span class="legend__item"><span class="legend__key" style="background:var(--series-1)"></span>Systolic</span>
+            <span class="legend__item"><span class="legend__key" style="background:var(--series-2)"></span>Diastolic</span>
+            <span class="legend__item"><span class="legend__key legend__key--goal"></span>Normal ceiling</span>
+          </div>
+          <div class="chart chart--short" id="bp-chart">
+            <svg id="bp-svg" role="img" tabindex="0" aria-describedby="bp-table-wrap"></svg>
+            <div class="tooltip" id="bp-tooltip" hidden></div>
+          </div>
+          <p class="chart__empty" id="bp-empty" hidden>Log at least two readings in this range to see a trend.</p>
+          <details class="table-toggle" id="bp-table-wrap">
+            <summary>Table view</summary>
+            <div class="table-scroll"><table class="table" id="bp-table"></table></div>
           </details>
         </section>
 
@@ -233,6 +257,39 @@
           </div>
         </form>
       </section>
+
+      <section class="card" aria-labelledby="bp-log-title">
+        <div class="card__head">
+          <h2 id="bp-log-title" class="card__title">Blood pressure</h2>
+          <span class="pill" id="bp-total"></span>
+        </div>
+        <ul class="entries" id="bp-list"></ul>
+        <form id="bp-form" class="form form--inline">
+          <label class="field field--sm">
+            <span class="field__label">Time</span>
+            <input type="time" name="time" required>
+          </label>
+          <label class="field field--xs">
+            <span class="field__label">SYS</span>
+            <input type="number" name="systolic" inputmode="numeric" min="40" max="300" step="1" required placeholder="120">
+          </label>
+          <label class="field field--xs">
+            <span class="field__label">DIA</span>
+            <input type="number" name="diastolic" inputmode="numeric" min="20" max="200" step="1" required placeholder="80">
+          </label>
+          <label class="field field--xs">
+            <span class="field__label">Pulse</span>
+            <input type="number" name="pulse" inputmode="numeric" min="20" max="300" step="1" placeholder="&mdash;">
+          </label>
+          <label class="field field--grow">
+            <span class="field__label">Note <span class="field__opt">optional</span></span>
+            <input type="text" name="note" maxlength="140" placeholder="Seated, after 5 min rest">
+          </label>
+          <div class="form__actions">
+            <button type="submit" class="btn btn--primary">Add reading</button>
+          </div>
+        </form>
+      </section>
     </section>
 
     <!-- ============ HISTORY ============ -->
@@ -246,6 +303,7 @@
           <button type="button" role="tab" data-tab="weights" aria-selected="true">Weigh-ins</button>
           <button type="button" role="tab" data-tab="meals" aria-selected="false">Meals</button>
           <button type="button" role="tab" data-tab="exercise" aria-selected="false">Exercise</button>
+          <button type="button" role="tab" data-tab="bp" aria-selected="false">Blood pressure</button>
         </div>
       </div>
       <section class="card">

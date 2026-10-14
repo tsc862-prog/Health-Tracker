@@ -179,6 +179,8 @@ button, input, select { font: inherit; color: inherit; }
 .tiles { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
 @media (min-width: 760px) { .tiles { grid-template-columns: repeat(4, minmax(0, 1fr)); } }
 .tiles--compact { gap: 10px; }
+@media (min-width: 760px) { .tiles--compact { grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); } }
+@media (min-width: 760px) { .tiles--3 { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
 .tile {
   background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius);
   box-shadow: var(--shadow); padding: 14px 16px;
@@ -268,7 +270,7 @@ button, input, select { font: inherit; color: inherit; }
 .form--inline .field:not(.field--grow):not(.field--sm):not(.field--xs) { flex: 0 1 150px; }
 .field__label { font-size: 0.82rem; color: var(--text-2); font-weight: 500; }
 .field__opt { color: var(--muted); font-weight: 400; }
-input[type="text"], input[type="number"], input[type="date"], select {
+input[type="text"], input[type="number"], input[type="date"], input[type="time"], input[type="email"], input[type="password"], select {
   width: 100%; padding: 9px 11px; border-radius: var(--radius-sm);
   border: 1px solid var(--border); background: var(--surface-2); color: var(--text);
   outline: none; transition: border-color 0.15s, box-shadow 0.15s;
@@ -337,6 +339,21 @@ input::placeholder { color: var(--muted); }
   .entry__meta { grid-area: meta; }
   .entry__del { grid-area: del; }
 }
+
+/* ---------- blood pressure ---------- */
+.chart--short svg { height: 220px; }
+.chart .dot--dia { fill: var(--series-2); }
+.bp-level {
+  display: inline-flex; align-items: center; gap: 5px; font-size: 0.8rem; font-weight: 500; color: var(--text-2);
+  --lvl: var(--muted); white-space: nowrap;
+}
+.bp-level::before { content: ''; width: 8px; height: 8px; border-radius: 50%; background: var(--lvl); flex: none; }
+.bp-level[data-level="normal"] { --lvl: #0ca30c; }
+.bp-level[data-level="elevated"] { --lvl: #fab219; }
+.bp-level[data-level="stage1"] { --lvl: #ec835a; }
+.bp-level[data-level="stage2"] { --lvl: #d03b3b; }
+.bp-level[data-level="crisis"] { --lvl: #d03b3b; color: var(--bad); font-weight: 650; }
+.entry__title .bp-level { margin-left: 4px; vertical-align: middle; }
 
 /* ---------- preset chips ---------- */
 .chips { display: flex; flex-wrap: wrap; gap: 8px; }

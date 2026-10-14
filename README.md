@@ -12,6 +12,7 @@ No build step. The site is static HTML, CSS, and JavaScript, so it deploys strai
 - **Presets** for meals you eat often ("Morning coffee" logs the same calories every time, one tap) and for your usual exercises (tap to fill in the form, adjust the minutes, add). Save a preset from the log form with the "Save as preset" checkbox, or manage them in Settings.
 - **Label scanner**: tap *Scan label*, photograph a package's Nutrition Facts panel, and the app reads the name, calories, protein, carbs, and fat on-device, then lets you check the values and save them as a preset (and log the meal right away). Handy for prepared meals such as Factor. OCR runs in the browser with Tesseract.js, loaded on first use; the photo never leaves your device.
 - **Macros**: meals and presets carry optional protein, carbs, and fat in grams, with daily totals on the Log page and a column in History.
+- **Blood pressure**: log readings with time of day, systolic, diastolic, and pulse, as many per day as you like. Each reading gets an American Heart Association category (Normal, Elevated, Stage 1, Stage 2, Crisis). The dashboard shows the latest reading, the 7-day average, and a systolic/diastolic trend chart with the 120/80 ceilings marked.
 - **History** tables for every weigh-in, meal, and workout, with one-click removal
 - **Account & sync**: email and password sign-in, offline-first sync across phones and computers, sync status in the header
 - **Settings** for pounds or kilograms, goal weight, light/dark/system theme, JSON export and import, and a full reset
@@ -73,9 +74,16 @@ Until this is set, confirmation links land on a Supabase default page. The accou
 | `exercise` | `id` | Exercise sessions with minutes and optional calories |
 | `meal_presets` | `id` | Saved meals for one-tap logging, with calories and macros |
 | `exercise_presets` | `id` | Saved exercises with default minutes and calories |
+| `blood_pressure` | `id` | Readings with time, systolic, diastolic, pulse, note |
 | `user_settings` | `user_id` | Unit and goal weight |
 
-Every table has a policy restricting all operations to `auth.uid() = user_id`.
+Every table has a policy restricting all operations to `auth.uid() = user_id`. The SQL lives in `supabase/migrations/`.
+
+### Applying a new migration
+
+When a release adds a table, run the new file from `supabase/migrations/` in the project's SQL editor (Supabase dashboard → SQL Editor → paste → Run). Until then the app keeps that data on-device and says so on the Settings page; it uploads automatically on the next sync after the table exists.
+
+Pending for the current release: `20261014000000_blood_pressure.sql`.
 
 ## Project layout
 
