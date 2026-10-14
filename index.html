@@ -178,20 +178,21 @@
             <span class="field__label">Calories</span>
             <input type="number" name="calories" inputmode="numeric" min="0" max="20000" step="1" placeholder="&mdash;">
           </label>
-          <label class="field field--xs">
+          <label class="field field--xs field--macro">
             <span class="field__label">Protein g</span>
             <input type="number" name="protein" inputmode="numeric" min="0" max="999" step="1" placeholder="&mdash;">
           </label>
-          <label class="field field--xs">
+          <label class="field field--xs field--macro">
             <span class="field__label">Carbs g</span>
             <input type="number" name="carbs" inputmode="numeric" min="0" max="999" step="1" placeholder="&mdash;">
           </label>
-          <label class="field field--xs">
+          <label class="field field--xs field--macro">
             <span class="field__label">Fat g</span>
             <input type="number" name="fat" inputmode="numeric" min="0" max="999" step="1" placeholder="&mdash;">
           </label>
           <div class="form__actions">
             <button type="submit" class="btn btn--primary">Add meal</button>
+            <button type="button" class="btn btn--ghost btn--small" id="meal-macros-toggle" aria-controls="meal-form">Macros</button>
             <label class="check"><input type="checkbox" name="savePreset"> Save as preset</label>
           </div>
         </form>

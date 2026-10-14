@@ -265,7 +265,7 @@ button, input, select { font: inherit; color: inherit; }
 .field { display: flex; flex-direction: column; gap: 5px; min-width: 0; border: 0; padding: 0; margin: 0; }
 .field--grow { flex: 1 1 180px; }
 .field--sm { flex: 0 1 120px; }
-.form--inline .field:not(.field--grow):not(.field--sm) { flex: 0 1 150px; }
+.form--inline .field:not(.field--grow):not(.field--sm):not(.field--xs) { flex: 0 1 150px; }
 .field__label { font-size: 0.82rem; color: var(--text-2); font-weight: 500; }
 .field__opt { color: var(--muted); font-weight: 400; }
 input[type="text"], input[type="number"], input[type="date"], select {
@@ -348,11 +348,17 @@ input::placeholder { color: var(--muted); }
 .chip:hover { border-color: var(--accent); background: var(--accent-wash); }
 .chip:focus-visible { outline: none; box-shadow: 0 0 0 3px var(--accent-wash); border-color: var(--accent); }
 .chip__meta { color: var(--text-2); font-size: 0.78rem; font-weight: 400; }
+.chip--more { background: transparent; border-style: dashed; color: var(--text-2); }
+.chips__label { font-size: 0.76rem; color: var(--muted); align-self: center; text-transform: uppercase; letter-spacing: 0.04em; margin-right: 2px; }
+.chips__empty { font-size: 0.84rem; color: var(--muted); align-self: center; }
+#meal-form .field--macro { display: none; }
+#meal-form.show-macros .field--macro { display: flex; }
+#meal-form.show-macros #meal-macros-toggle { color: var(--text); background: var(--surface-2); }
 .check { display: inline-flex; align-items: center; gap: 6px; font-size: 0.86rem; color: var(--text-2); cursor: pointer; user-select: none; }
 .check input { accent-color: var(--accent); width: 15px; height: 15px; margin: 0; }
 
 /* ---------- label scanner dialog ---------- */
-.field--xs { flex: 0 1 92px; }
+.field--xs, .form--inline .field.field--xs { flex: 0 1 92px; }
 .card__tools { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
 .btn svg { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
 .dialog {

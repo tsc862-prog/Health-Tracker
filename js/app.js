@@ -652,6 +652,15 @@
     $('#log-next').addEventListener('click', () => { logDate = addDays(logDate, 1); render(); });
     $('#log-today').addEventListener('click', () => { logDate = todayISO(); render(); });
 
+    // Typing in the meal or activity box filters the preset strip.
+    $('#meal-form').description.addEventListener('input', renderPresetChips);
+    $('#exercise-form').activity.addEventListener('input', renderPresetChips);
+    $('#meal-macros-toggle').addEventListener('click', () => {
+      const f = $('#meal-form');
+      f.classList.toggle('show-macros');
+      if (f.classList.contains('show-macros')) f.protein.focus();
+    });
+
     $('#weight-form').addEventListener('submit', (e) => {
       e.preventDefault();
       const f = e.target;
@@ -679,6 +688,7 @@
       const presetSaved = f.savePreset.checked && savePreset('mealPresets', { name: desc, type: f.type.value, calories: meal.calories, protein: meal.protein, carbs: meal.carbs, fat: meal.fat });
       ['description', 'calories', 'protein', 'carbs', 'fat'].forEach((k) => { f[k].value = ''; });
       f.savePreset.checked = false;
+      f.classList.remove('show-macros');
       render(); toast(presetSaved ? 'Meal added and saved as a preset' : 'Meal added');
       f.description.focus();
     });
@@ -792,27 +802,70 @@
       h('span', { class: 'chip__name' }, label), meta ? h('span', { class: 'chip__meta' }, meta) : null);
   }
 
-  function renderPresetChips() {
-    const mc = $('#meal-presets');
-    clear(mc);
-    const mp = sortedPresets('mealPresets');
-    mc.hidden = !mp.length;
-    mp.forEach((p) => mc.append(chip(p.name, [p.calories != null ? `${fmtInt(p.calories)} kcal` : null, p.protein != null ? `${fmtInt(p.protein)}g protein` : null].filter(Boolean).join(' · '), 'Log this meal now', () => {
-      addMeal({ type: p.type, description: p.name, calories: p.calories, protein: p.protein, carbs: p.carbs, fat: p.fat });
-      render(); toast(`${p.name} logged`);
-    })));
+  const CHIP_LIMIT = 6;
+  const chipsExpanded = { mealPresets: false, exercisePresets: false };
 
-    const xc = $('#exercise-presets');
-    clear(xc);
-    const xp = sortedPresets('exercisePresets');
-    xc.hidden = !xp.length;
-    xp.forEach((p) => xc.append(chip(p.name, exerciseMeta(p), 'Fill in this exercise', () => {
-      const f = $('#exercise-form');
-      f.activity.value = p.name;
-      f.minutes.value = p.minutes != null ? p.minutes : '';
-      f.calories.value = p.calories != null ? p.calories : '';
-      f.minutes.focus(); f.minutes.select();
-    })));
+  /** How often each preset name was logged in the last 60 days, so the strip leads with what you use. */
+  function presetUsage(kind) {
+    const from = addDays(todayISO(), -60);
+    const src = kind === 'mealPresets' ? state.meals : state.exercise;
+    const field = kind === 'mealPresets' ? 'description' : 'activity';
+    const counts = new Map();
+    for (const x of src) {
+      if (x.date < from) continue;
+      const k = x[field].toLowerCase();
+      counts.set(k, (counts.get(k) || 0) + 1);
+    }
+    return counts;
+  }
+  function rankedPresets(kind) {
+    const u = presetUsage(kind);
+    const n = (p) => u.get(p.name.toLowerCase()) || 0;
+    return [...state[kind]].sort((a, b) => n(b) - n(a) || a.name.localeCompare(b.name));
+  }
+
+  /** A compact strip: top presets, a "more" chip for the rest, and live filtering by the text typed in the form. */
+  function renderChipStrip(container, kind, query, { metaOf, title, onPick }) {
+    clear(container);
+    const all = rankedPresets(kind);
+    container.hidden = !all.length;
+    if (!all.length) return;
+    const q = query.trim().toLowerCase();
+    const matches = q ? all.filter((p) => p.name.toLowerCase().includes(q)) : all;
+    const expanded = chipsExpanded[kind] || !!q;
+    const shown = expanded ? matches : matches.slice(0, CHIP_LIMIT);
+    container.append(h('span', { class: 'chips__label' }, q ? 'Matching' : 'Quick add'));
+    shown.forEach((p) => container.append(chip(p.name, metaOf(p), title, () => onPick(p))));
+    if (q && !matches.length) container.append(h('span', { class: 'chips__empty' }, 'No preset matches'));
+    if (!expanded && matches.length > CHIP_LIMIT) {
+      container.append(h('button', { type: 'button', class: 'chip chip--more', onclick: () => { chipsExpanded[kind] = true; renderPresetChips(); } }, `${matches.length - CHIP_LIMIT} more`));
+    } else if (chipsExpanded[kind] && !q && all.length > CHIP_LIMIT) {
+      container.append(h('button', { type: 'button', class: 'chip chip--more', onclick: () => { chipsExpanded[kind] = false; renderPresetChips(); } }, 'Show fewer'));
+    }
+  }
+
+  function renderPresetChips() {
+    renderChipStrip($('#meal-presets'), 'mealPresets', $('#meal-form').description.value, {
+      metaOf: (p) => (p.calories != null ? `${fmtInt(p.calories)} kcal` : ''),
+      title: 'Log this meal now',
+      onPick: (p) => {
+        addMeal({ type: p.type, description: p.name, calories: p.calories, protein: p.protein, carbs: p.carbs, fat: p.fat });
+        $('#meal-form').description.value = '';
+        render(); toast(`${p.name} logged`);
+      },
+    });
+    renderChipStrip($('#exercise-presets'), 'exercisePresets', $('#exercise-form').activity.value, {
+      metaOf: exerciseMeta,
+      title: 'Fill in this exercise',
+      onPick: (p) => {
+        const f = $('#exercise-form');
+        f.activity.value = p.name;
+        f.minutes.value = p.minutes != null ? p.minutes : '';
+        f.calories.value = p.calories != null ? p.calories : '';
+        renderPresetChips();
+        f.minutes.focus(); f.minutes.select();
+      },
+    });
   }
 
   function presetRow(kind, p) {
